@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+""" Frobenius norm difference experiment. """
+from argparse import ArgumentParser
+from functools import partial
+from math import sqrt
+import os
+import os.path
+import numpy as np
+from threadpoolctl import threadpool_limits
+from meta.alg import (MoM, AltMin, NucNorm, NucNormVal, BurerMonteiro,
+                      SingleTask, LassoSingleTask, OracleSingleTask)
+from meta.exp import Exp, dump
+from meta.task import adversarial_features, adversarial_params, TaskSampler
+
+
+def get_all_algs(low_dim, nuc_norm_reg_coef, lasso_single_task_max_iter):
+  """ Returns the dictionary of all algorithms. """
+  return {
+    "mom": MoM(low_dim),
+    "altmin": AltMin(low_dim),
+    "nuc": NucNorm(low_dim, nuc_norm_reg_coef),
+    "nuc-val": NucNormVal(low_dim),
+    "bm": BurerMonteiro(low_dim),
+    "single": SingleTask(low_dim),
+    "single-lasso": LassoSingleTask(low_dim,
+                                    max_iter=lasso_single_task_max_iter),
+    "single-oracle": OracleSingleTask(),
+  }
+
+
+def get_args(launcher):
+  """ Returns argument parser. """
+  parser = ArgumentParser()
+  parser.add_argument("--filename", default="exp.pickle")
+  parser.add_argument("--dry", action="store_true")
+  if launcher:
+    parser.add_argument("--num-runs", type=int)
+    return parser.parse_known_args()
+  alg_choices = list(get_all_algs(low_dim=10, nuc_norm_reg_coef=0.22,
+                                  lasso_single_task_max_iter=10_000).keys())
+  parser.add_argument("--enable-algs", nargs="+", choices=alg_choices)
+  parser.add_argument("--disable-algs", nargs='*', choices=alg_choices,
+                      default=["nuc-val"])
+  parser.add_argument("--features-dist", default="normal",
+                      choices=["normal", "uniform", "adversarial"])
+  parser.add_argument("--params-dist", default="normal",
+                      choices=["normal", "adversarial"])
+  parser.add_argument("--thread-limit", type=int, default=4)
+  parser.add_argument("--ntasks", type=int)
+  parser.add_argument("--ntasks-range", nargs=3, type=int)
+  parser.add_argument("--task-size", type=int)
+  parser.add_argument("--task-size-range", nargs=3, type=int)
+  parser.add_argument("--label-scale", type=float, default=1.)
+  parser.add_argument("--label-scale-range", nargs=3, type=float)
+  parser.add_argument("--high-dim", type=int, default=100)
+  parser.add_argument("--low-dim", type=int, default=5)
+  parser.add_argument("--nuc-norm-reg-coef", type=float)
+  parser.add_argument("--lasso-single-task-max-iter", type=int, default=10_000)
+  parser.add_argument("--logdir", required=True)
+  return parser.parse_args()
+
+
+def make_space(start, end, num, asint):
+  """ Creates space of values. """
+  result = np.logspace(np.log2(start), np.log2(end), num=num, base=2)
+  if asint:
+    result = result.round(0).astype(int)
+  return result
+
+def spaces_from_args(args):
+  """ Creates spaces from args ranges. """
+  result = {}
+  if args.ntasks_range is not None:
+    result["ntasks"] = make_space(*args.ntasks_range, asint=True)
+  if args.task_size_range is not None:
+    result["task_size"] = make_space(*args.task_size_range, asint=True)
+  if args.label_scale_range is not None:
+    start, end, num = args.label_scale_range
+    result["label_scale"] = make_space(start, end, round(num), asint=False)
+  return result
+
+
+def run(args):
+  """ Performs a single run for given args. """
+  algs = get_all_algs(args.low_dim, args.nuc_norm_reg_coef,
+                      args.lasso_single_task_max_iter)
+  if args.enable_algs is not None:
+    algs = {key: algs[key] for key in args.enable_algs}
+  if args.enable_algs and set(args.enable_algs) & set(args.disable_algs):
+    raise ValueError("--enable-algs and --disable-algs must not intersect")
+  algs = {key: algs[key] for key in algs if key not in set(args.disable_algs)}
+
+  features_dist = {
+    "normal": np.random.normal,
+    "uniform": partial(np.random.uniform, low=-sqrt(3), high=sqrt(3)),
+    "adversarial": adversarial_features,
+  }.get(args.features_dist)
+  params_dist = {
+    "normal": np.random.normal,
+    "adversarial": adversarial_params,
+  }.get(args.params_dist)
+
+  sampler = TaskSampler(features_dist=features_dist, params_dist=params_dist)
+  exp = Exp.make_with_bound_sampler(
+    algs, sampler=sampler,
+    ntasks=args.ntasks, task_size=args.task_size,
+    high_dim=args.high_dim, low_dim=args.low_dim,
+    label_scale=args.label_scale)
+
+  spaces = spaces_from_args(args)
+  with threadpool_limits(limits=args.thread_limit):
+    for key, space in spaces.items():
+      exp.run(key, space)
+
+  if not os.path.isdir(args.logdir):
+    os.makedirs(args.logdir)
+  dump(exp, os.path.join(args.logdir, args.filename))
+
+def main():
+  """ Script entrance point. """
+  args, unknown_args = get_args(launcher=True)
+  if args.num_runs is not None:
+    for i in range(args.num_runs):
+      cmd = (f"meta --filename {f'{i:02d}-{args.filename}'} "
+             + " ".join(unknown_args))
+      cmd = f"tsp zsh -c '{cmd}'"
+      print(cmd)
+      if not args.dry:
+        os.system(cmd)
+  elif not args.dry:
+    run(get_args(launcher=False))
+
+
+
+if __name__ == "__main__":
+  main()
