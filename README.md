@@ -1,4 +1,4 @@
-## Code for paper ["Trace norm regularization for multi-task learning with scarce data"](https://arxiv.org/abs/2202.06742v1)
+## Code for paper ["Trace norm regularization for multi-task learning with scarce data"](https://arxiv.org/abs/2202.06742)
 
 To install the package:
 
