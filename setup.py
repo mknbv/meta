@@ -12,7 +12,7 @@ setup(
     packages=["meta"],
     scripts=["meta/scripts/meta"],
     install_requires=[
-      "ipython==8.0.1",
+      "ipython==8.10.0",
       "ipywidgets==7.6.5",
       "jax[cpu]==0.2.27",
       "scipy==1.11.1",
