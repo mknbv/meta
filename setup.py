@@ -15,7 +15,7 @@ setup(
       "ipython==8.0.1",
       "ipywidgets==7.6.5",
       "jax[cpu]==0.2.27",
-      "scipy==1.7.3",
+      "scipy==1.11.1",
       "matplotlib==3.5.1",
       "numpy==1.22.1",
       "scikit-learn==1.0.2",
